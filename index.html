@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF Browser</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;400;500;600;700&display=swap');
+
+  :root {
+    --bg: #0f1117;
+    --surface: #181a22;
+    --surface-2: #1e2130;
+    --border: #2a2d3e;
+    --text: #e2e4ed;
+    --text-dim: #7a7f96;
+    --accent: #6c8aff;
+    --accent-dim: rgba(108,138,255,0.12);
+    --danger: #ff5c5c;
+    --danger-dim: rgba(255,92,92,0.15);
+    --highlight-bg: rgba(255,210,70,0.4);
+    --highlight-current: rgba(108,138,255,0.5);
+    --success: #4ae08a;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .sep { width:1px; height:20px; background: var(--border); flex-shrink:0; }
+
+  .file-name {
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+  }
+
+  .topbar-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .search-group { display: flex; align-items: center; gap: 6px; }
+  .search-box { position: relative; display: flex; align-items: center; }
+  .search-box .icon {
+    position: absolute; left: 9px; pointer-events: none;
+    color: var(--text-dim); width: 14px; height: 14px;
+  }
+  .search-input {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 6px 8px 6px 30px;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    width: 280px;
+    outline: none;
+    transition: border-color .2s, width .25s;
+  }
+  .search-input:focus { border-color: var(--accent); width: 340px; }
+  .search-input::placeholder { color: var(--text-dim); font-family: 'Outfit', sans-serif; }
+
+  .search-meta {
+    font-size: 11px; color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap; min-width: 50px; text-align: center;
+  }
+
+  .search-nav { display: flex; gap: 2px; }
+  .nav-btn {
+    background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--text-dim); width: 26px; height: 26px;
+    border-radius: 5px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s;
+  }
+  .nav-btn:hover { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+  .nav-btn svg { width: 12px; height: 12px; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 12px; border-radius: 7px;
+    font-family: 'Outfit', sans-serif; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--border); cursor: pointer;
+    transition: all .15s; white-space: nowrap;
+  }
+  .btn svg { width: 14px; height: 14px; }
+  .btn-ghost { background: transparent; color: var(--text-dim); }
+  .btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+  .btn-danger { background: var(--danger-dim); color: var(--danger); border-color: transparent; }
+  .btn-danger:hover { background: var(--danger); color: #fff; }
+  .btn-save { background: linear-gradient(135deg, var(--accent), #8b6cff); color:#fff; border:none; }
+  .btn-save:hover { filter: brightness(1.12); }
+
+  .delete-count {
+    background: var(--danger); color: #fff;
+    font-size: 10px; font-weight: 700;
+    padding: 1px 6px; border-radius: 10px;
+    min-width: 18px; text-align: center;
+  }
+
+  .main { display: flex; flex:1; overflow:hidden; }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 140px; min-width: 140px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 6px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+
+  .thumb {
+    position: relative; border-radius: 5px; overflow: hidden;
+    cursor: pointer; border: 2px solid transparent;
+    transition: all .15s; flex-shrink: 0;
+    background: var(--surface-2);
+  }
+  .thumb:hover { border-color: rgba(108,138,255,0.3); }
+  .thumb.active { border-color: var(--accent); }
+  .thumb.to-delete { border-color: var(--danger); opacity:.5; }
+  .thumb.to-delete::after {
+    content: ''; position: absolute; inset:0;
+    background: repeating-linear-gradient(-45deg, transparent, transparent 4px, rgba(255,92,92,0.15) 4px, rgba(255,92,92,0.15) 8px);
+    pointer-events: none;
+  }
+  .thumb.search-match .thumb-num { background: var(--accent); color:#fff; }
+  .thumb canvas { width:100%; display:block; border-radius:3px; }
+  .thumb .thumb-placeholder {
+    width: 100%; aspect-ratio: 8.5/11;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim); font-size: 18px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .thumb-num {
+    position: absolute; bottom: 4px; left: 4px;
+    background: rgba(0,0,0,.65); color: #ccc;
+    font-size: 10px; font-family: 'JetBrains Mono', monospace;
+    padding: 1px 5px; border-radius: 3px;
+  }
+
+  .thumb-del {
+    position: absolute; top: 3px; right: 3px;
+    width: 20px; height: 20px;
+    background: rgba(0,0,0,.6); border: none; border-radius: 4px;
+    color: var(--text-dim); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: all .15s; z-index: 2;
+  }
+  .thumb:hover .thumb-del { opacity:1; }
+  .thumb-del:hover { background: var(--danger); color:#fff; }
+  .thumb-del svg { width: 12px; height: 12px; }
+
+  /* ── Viewer ── */
+  .viewer {
+    flex: 1; overflow-y: auto; padding: 20px;
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
+  }
+
+  .page-wrap {
+    position: relative; flex-shrink: 0;
+    box-shadow: 0 2px 20px rgba(0,0,0,.4);
+    border-radius: 4px; overflow: hidden;
+    background: var(--surface-2);
+  }
+  .page-wrap.rendered { background: #fff; }
+  .page-wrap.to-delete { outline: 3px solid var(--danger); outline-offset: -1px; }
+  .page-wrap.to-delete::before {
+    content: 'MARKED FOR DELETION';
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    background: var(--danger); color: #fff;
+    font-size: 11px; font-weight: 600;
+    padding: 3px 12px; border-radius: 4px; z-index: 5; letter-spacing: 0.5px;
+  }
+
+  .page-wrap canvas { display: block; }
+
+  .page-placeholder {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim); font-size: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    position: absolute; inset: 0;
+  }
+
+  .page-label {
+    position: absolute; bottom: 8px; right: 8px;
+    background: rgba(0,0,0,.6); color: #ccc;
+    font-size: 11px; font-family: 'JetBrains Mono', monospace;
+    padding: 2px 8px; border-radius: 4px; z-index: 5;
+  }
+
+  .page-del-btn {
+    position: absolute; top: 8px; right: 8px;
+    background: rgba(0,0,0,.55); border: none; color: #aaa;
+    padding: 5px 10px; border-radius: 5px; cursor: pointer;
+    font-size: 12px; font-family: 'Outfit', sans-serif; font-weight: 500;
+    z-index: 5; opacity: 0; transition: all .15s;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .page-wrap:hover .page-del-btn { opacity:1; }
+  .page-del-btn:hover { background: var(--danger); color:#fff; }
+  .page-del-btn svg { width: 13px; height: 13px; }
+
+  .highlight-layer {
+    position: absolute; top: 0; left: 0;
+    pointer-events: none; z-index: 3;
+  }
+
+  .hl-rect {
+    position: absolute; background: var(--highlight-bg);
+    border-radius: 2px; transition: background .15s;
+  }
+  .hl-rect.current { background: var(--highlight-current); box-shadow: 0 0 6px rgba(108,138,255,.6); }
+
+  /* ── Drop zone ── */
+  .dropzone {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px; padding: 40px;
+  }
+  .drop-area {
+    width: 450px; max-width: 90vw;
+    border: 2px dashed var(--border); border-radius: 16px;
+    padding: 50px 36px; text-align: center; cursor: pointer;
+    transition: all .25s;
+  }
+  .drop-area:hover, .drop-area.dragover { border-color: var(--accent); background: var(--accent-dim); }
+  .drop-area .drop-icon { width: 48px; height: 48px; color: var(--text-dim); margin: 0 auto 16px; display: block; }
+  .drop-area h2 { font-size: 16px; font-weight: 500; margin-bottom: 6px; }
+  .drop-area p { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+  .syntax-help {
+    margin-top: 20px; text-align: left;
+    background: var(--surface-2); border-radius: 8px; padding: 14px 16px;
+  }
+  .syntax-help h3 {
+    font-size: 11px; font-weight: 600; color: var(--accent);
+    margin-bottom: 8px; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.8px;
+  }
+  .syntax-help code {
+    display: block; font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--text-dim); line-height: 1.9;
+  }
+  .syntax-help code em { color: var(--accent); font-style: normal; }
+
+  /* ── Progress bar ── */
+  .progress-wrap {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: 3px; z-index: 200; background: transparent;
+  }
+  .progress-bar {
+    height: 100%; width: 0;
+    background: linear-gradient(90deg, var(--accent), #8b6cff);
+    transition: width .15s;
+    border-radius: 0 2px 2px 0;
+    box-shadow: 0 0 8px rgba(108,138,255,.4);
+  }
+
+  .toast {
+    position: fixed; bottom: 20px; left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 10px 20px; border-radius: 10px;
+    font-size: 13px; z-index: 999; opacity: 0;
+    transition: all .3s; pointer-events: none;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); opacity:1; }
+
+  #fileInput { display: none; }
+
+  .statusbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 4px 14px; background: var(--surface);
+    border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace; flex-shrink: 0;
+  }
+
+  .loading-overlay {
+    position: fixed; inset:0;
+    background: rgba(15,17,23,0.85);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 500; flex-direction: column; gap: 12px;
+  }
+  .loading-overlay .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-overlay span { font-size: 13px; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<div class="progress-wrap" id="progressWrap" style="display:none">
+  <div class="progress-bar" id="progressBar"></div>
+</div>
+
+<div class="topbar">
+  <span class="logo">pdf/browser</span>
+  <div class="sep"></div>
+  <span class="file-name" id="fileName">No file loaded</span>
+  <div class="topbar-right" id="toolbarActions" style="display:none">
+    <div class="search-group">
+      <div class="search-box">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+        <input class="search-input" id="searchInput" type="text" placeholder='AND OR NOT "exact phrase"'>
+      </div>
+      <span class="search-meta" id="searchMeta"></span>
+      <div class="search-nav">
+        <button class="nav-btn" id="prevMatch" title="Previous (Shift+Enter)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="18 15 12 9 6 15"/></svg>
+        </button>
+        <button class="nav-btn" id="nextMatch" title="Next (Enter)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <button class="btn btn-ghost" id="btnOpen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+      Open
+    </button>
+    <button class="btn btn-danger" id="btnDeleteSelected" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      Delete <span class="delete-count" id="deleteCount">0</span>
+    </button>
+    <button class="btn btn-save" id="btnSave">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      Save
+    </button>
+  </div>
+</div>
+
+<div class="main" id="mainArea">
+  <div class="dropzone" id="dropzone">
+    <div class="drop-area" id="dropArea">
+      <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="12" y1="18" x2="12" y2="12"/>
+        <polyline points="9 15 12 12 15 15"/>
+      </svg>
+      <h2>Drop a PDF here or click to browse</h2>
+      <p>100% local — nothing leaves your browser.</p>
+      <div class="syntax-help">
+        <h3>BOOLEAN SEARCH SYNTAX</h3>
+        <code>
+          <em>budget</em> ── simple keyword (case-insensitive)<br>
+          <em>"annual report"</em> ── exact phrase match<br>
+          <em>budget AND forecast</em> ── page must contain both<br>
+          <em>budget OR forecast</em> ── page contains either<br>
+          <em>budget NOT draft</em> ── has "budget", excludes "draft"<br>
+          <em>"Q3" AND revenue NOT projection</em> ── combine operators
+        </code>
+      </div>
+    </div>
+  </div>
+  <div class="sidebar" id="sidebar" style="display:none"></div>
+  <div class="viewer" id="viewer" style="display:none"></div>
+</div>
+
+<div class="statusbar" id="statusbar" style="display:none">
+  <span id="statusLeft">Ready</span>
+  <span id="statusRight"></span>
+</div>
+
+<div class="toast" id="toast"></div>
+<input type="file" id="fileInput" accept="application/pdf">
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const $ = id => document.getElementById(id);
+
+// ── State ──
+let pdfDoc = null;
+let pdfBytes = null;
+let pageTexts = [];
+let pageDims = [];          // [{w, h}] at SCALE for each page
+let pagesToDelete = new Set();
+let searchResults = [];
+let currentMatchIdx = -1;
+let fileName = '';
+
+const SCALE = 1.5;
+const THUMB_SCALE = 0.35;
+const RENDER_AHEAD = 3;     // pages to pre-render ahead of viewport
+const RENDER_BEHIND = 2;    // pages to keep rendered behind viewport
+const UNLOAD_DISTANCE = 8;  // pages beyond this get their canvas cleared
+
+// Track which pages/thumbs are rendered
+const renderedPages = new Set();
+const renderedThumbs = new Set();
+let renderQueue = [];
+let isRendering = false;
+
+// ── File handling ──
+$('dropArea').addEventListener('click', () => $('fileInput').click());
+$('btnOpen').addEventListener('click', () => $('fileInput').click());
+$('fileInput').addEventListener('change', e => { if(e.target.files[0]) loadFile(e.target.files[0]); });
+$('dropArea').addEventListener('dragover', e => { e.preventDefault(); $('dropArea').classList.add('dragover'); });
+$('dropArea').addEventListener('dragleave', () => $('dropArea').classList.remove('dragover'));
+$('dropArea').addEventListener('drop', e => {
+  e.preventDefault();
+  $('dropArea').classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if(f && f.type === 'application/pdf') loadFile(f);
+});
+
+// ── Progress bar ──
+function showProgress(pct) {
+  $('progressWrap').style.display = '';
+  $('progressBar').style.width = pct + '%';
+}
+function hideProgress() {
+  $('progressBar').style.width = '100%';
+  setTimeout(() => { $('progressWrap').style.display = 'none'; $('progressBar').style.width = '0'; }, 400);
+}
+
+// ── Load file ──
+async function loadFile(file) {
+  showProgress(5);
+  fileName = file.name;
+  $('fileName').textContent = fileName;
+  const buf = await file.arrayBuffer();
+  pdfBytes = new Uint8Array(buf);
+  showProgress(15);
+
+  pdfDoc = await pdfjsLib.getDocument({data: pdfBytes.slice()}).promise;
+  showProgress(25);
+
+  // Get dimensions for ALL pages (fast — no rendering)
+  pageDims = [];
+  for(let i = 0; i < pdfDoc.numPages; i++) {
+    const page = await pdfDoc.getPage(i + 1);
+    const vp = page.getViewport({scale: SCALE});
+    pageDims.push({w: vp.width, h: vp.height});
+  }
+  showProgress(35);
+
+  // Extract text progressively in background
+  pageTexts = new Array(pdfDoc.numPages).fill(null);
+  extractTextProgressively();
+
+  // Reset state
+  pagesToDelete.clear();
+  searchResults = [];
+  currentMatchIdx = -1;
+  renderedPages.clear();
+  renderedThumbs.clear();
+  renderQueue = [];
+  $('searchInput').value = '';
+  $('searchMeta').textContent = '';
+
+  // Show UI
+  $('dropzone').style.display = 'none';
+  $('sidebar').style.display = '';
+  $('viewer').style.display = '';
+  $('toolbarActions').style.display = '';
+  $('statusbar').style.display = '';
+
+  showProgress(45);
+  buildSkeleton();
+  showProgress(70);
+
+  // Render first few pages + thumbs immediately
+  for(let i = 0; i < Math.min(RENDER_AHEAD + 1, pdfDoc.numPages); i++) {
+    await renderPage(i);
+    await renderThumb(i);
+    showProgress(70 + (i / Math.min(RENDER_AHEAD + 1, pdfDoc.numPages)) * 25);
+  }
+
+  setupViewerObserver();
+  setupSidebarObserver();
+  updateDeleteUI();
+  updateStatus();
+  hideProgress();
+}
+
+// ── Extract text in background without blocking ──
+function extractTextProgressively() {
+  let i = 0;
+  function extractNext() {
+    if(!pdfDoc || i >= pdfDoc.numPages) return;
+    const idx = i++;
+    pdfDoc.getPage(idx + 1).then(page => {
+      page.getTextContent().then(tc => {
+        pageTexts[idx] = tc.items.map(it => it.str).join(' ');
+        // Continue on next idle frame
+        if(typeof requestIdleCallback !== 'undefined') {
+          requestIdleCallback(extractNext);
+        } else {
+          setTimeout(extractNext, 0);
+        }
+      });
+    });
+  }
+  // Kick off — first batch of 10 run quickly, then idle
+  function extractBatch() {
+    const batchEnd = Math.min(i + 10, pdfDoc.numPages);
+    const promises = [];
+    while(i < batchEnd) {
+      const idx = i++;
+      promises.push(
+        pdfDoc.getPage(idx + 1).then(page =>
+          page.getTextContent().then(tc => {
+            pageTexts[idx] = tc.items.map(it => it.str).join(' ');
+          })
+        )
+      );
+    }
+    Promise.all(promises).then(() => {
+      if(i < pdfDoc.numPages) {
+        if(typeof requestIdleCallback !== 'undefined') {
+          requestIdleCallback(extractNext);
+        } else {
+          setTimeout(extractNext, 0);
+        }
+      }
+    });
+  }
+  extractBatch();
+}
+
+// ── Build DOM skeleton with placeholder divs (instant) ──
+function buildSkeleton() {
+  $('sidebar').innerHTML = '';
+  $('viewer').innerHTML = '';
+
+  for(let i = 0; i < pdfDoc.numPages; i++) {
+    const dim = pageDims[i];
+
+    // ── Thumbnail skeleton ──
+    const thumbDiv = document.createElement('div');
+    thumbDiv.className = 'thumb' + (i === 0 ? ' active' : '');
+    thumbDiv.dataset.page = i;
+
+    const placeholder = document.createElement('div');
+    placeholder.className = 'thumb-placeholder';
+    placeholder.textContent = i + 1;
+    thumbDiv.appendChild(placeholder);
+
+    const numLbl = document.createElement('span');
+    numLbl.className = 'thumb-num';
+    numLbl.textContent = i + 1;
+    thumbDiv.appendChild(numLbl);
+
+    const tDel = document.createElement('button');
+    tDel.className = 'thumb-del';
+    tDel.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    tDel.addEventListener('click', e => { e.stopPropagation(); toggleDelete(i); });
+    thumbDiv.appendChild(tDel);
+
+    thumbDiv.addEventListener('click', () => scrollToPage(i));
+    $('sidebar').appendChild(thumbDiv);
+
+    // ── Page skeleton ──
+    const wrap = document.createElement('div');
+    wrap.className = 'page-wrap';
+    wrap.id = 'page-' + i;
+    wrap.dataset.page = i;
+    wrap.style.width = dim.w + 'px';
+    wrap.style.height = dim.h + 'px';
+
+    const ph = document.createElement('div');
+    ph.className = 'page-placeholder';
+    ph.textContent = `Page ${i + 1}`;
+    wrap.appendChild(ph);
+
+    const hlLayer = document.createElement('div');
+    hlLayer.className = 'highlight-layer';
+    hlLayer.style.width = dim.w + 'px';
+    hlLayer.style.height = dim.h + 'px';
+    hlLayer.id = 'hl-' + i;
+    wrap.appendChild(hlLayer);
+
+    const lbl = document.createElement('span');
+    lbl.className = 'page-label';
+    lbl.textContent = `${i+1} / ${pdfDoc.numPages}`;
+    wrap.appendChild(lbl);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'page-del-btn';
+    delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete';
+    delBtn.addEventListener('click', () => toggleDelete(i));
+    wrap.appendChild(delBtn);
+
+    $('viewer').appendChild(wrap);
+  }
+}
+
+// ── Render a single page canvas ──
+async function renderPage(idx) {
+  if(renderedPages.has(idx) || !pdfDoc || idx < 0 || idx >= pdfDoc.numPages) return;
+  renderedPages.add(idx);
+
+  const wrap = $('page-' + idx);
+  if(!wrap) return;
+
+  const page = await pdfDoc.getPage(idx + 1);
+  const vp = page.getViewport({scale: SCALE});
+
+  const canvas = document.createElement('canvas');
+  canvas.width = vp.width;
+  canvas.height = vp.height;
+  canvas.className = 'page-canvas';
+  await page.render({canvasContext: canvas.getContext('2d'), viewport: vp}).promise;
+
+  // Remove placeholder, insert canvas
+  const ph = wrap.querySelector('.page-placeholder');
+  if(ph) ph.remove();
+  wrap.insertBefore(canvas, wrap.firstChild);
+  wrap.classList.add('rendered');
+}
+
+// ── Unload a page canvas to free memory ──
+function unloadPage(idx) {
+  if(!renderedPages.has(idx)) return;
+  renderedPages.delete(idx);
+
+  const wrap = $('page-' + idx);
+  if(!wrap) return;
+
+  const canvas = wrap.querySelector('.page-canvas');
+  if(canvas) canvas.remove();
+
+  // Re-add placeholder
+  if(!wrap.querySelector('.page-placeholder')) {
+    const ph = document.createElement('div');
+    ph.className = 'page-placeholder';
+    ph.textContent = `Page ${idx + 1}`;
+    wrap.insertBefore(ph, wrap.firstChild);
+  }
+  wrap.classList.remove('rendered');
+}
+
+// ── Render a single thumbnail ──
+async function renderThumb(idx) {
+  if(renderedThumbs.has(idx) || !pdfDoc || idx < 0 || idx >= pdfDoc.numPages) return;
+  renderedThumbs.add(idx);
+
+  const thumbDiv = document.querySelectorAll('.thumb')[idx];
+  if(!thumbDiv) return;
+
+  const page = await pdfDoc.getPage(idx + 1);
+  const thumbVp = page.getViewport({scale: THUMB_SCALE});
+
+  const tc = document.createElement('canvas');
+  tc.width = thumbVp.width;
+  tc.height = thumbVp.height;
+  await page.render({canvasContext: tc.getContext('2d'), viewport: thumbVp}).promise;
+
+  const ph = thumbDiv.querySelector('.thumb-placeholder');
+  if(ph) ph.remove();
+  thumbDiv.insertBefore(tc, thumbDiv.firstChild);
+}
+
+// ── Viewport-driven lazy rendering ──
+let currentVisiblePage = 0;
+
+function setupViewerObserver() {
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(en => {
+      const idx = parseInt(en.target.dataset.page);
+      if(en.isIntersecting) {
+        currentVisiblePage = idx;
+        // Render this page + ahead buffer
+        for(let j = idx - RENDER_BEHIND; j <= idx + RENDER_AHEAD; j++) {
+          if(j >= 0 && j < pdfDoc.numPages) {
+            renderPage(j);
+          }
+        }
+        // Unload far-away pages
+        for(const rendered of renderedPages) {
+          if(Math.abs(rendered - idx) > UNLOAD_DISTANCE) {
+            unloadPage(rendered);
+          }
+        }
+        // Update active thumb
+        document.querySelectorAll('.thumb').forEach(t =>
+          t.classList.toggle('active', parseInt(t.dataset.page) === idx)
+        );
+        const activeThumb = document.querySelector('.thumb.active');
+        if(activeThumb) activeThumb.scrollIntoView({block:'nearest', behavior:'auto'});
+        updateStatus();
+      }
+    });
+  }, {
+    root: $('viewer'),
+    // This is the magic: observe well beyond the viewport so we render ahead
+    rootMargin: '200% 0px 200% 0px',
+    threshold: 0.01
+  });
+
+  document.querySelectorAll('.page-wrap').forEach(pw => obs.observe(pw));
+}
+
+function setupSidebarObserver() {
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(en => {
+      if(en.isIntersecting) {
+        const idx = parseInt(en.target.dataset.page);
+        renderThumb(idx);
+        // Render a few neighbors
+        for(let j = idx - 2; j <= idx + 5; j++) {
+          if(j >= 0 && j < pdfDoc.numPages) renderThumb(j);
+        }
+      }
+    });
+  }, {
+    root: $('sidebar'),
+    rootMargin: '300px 0px 300px 0px',
+    threshold: 0.01
+  });
+
+  document.querySelectorAll('.thumb').forEach(t => obs.observe(t));
+}
+
+function scrollToPage(idx) {
+  // Pre-render target + surroundings before scrolling
+  for(let j = idx - RENDER_BEHIND; j <= idx + RENDER_AHEAD; j++) {
+    if(j >= 0 && j < pdfDoc.numPages) renderPage(j);
+  }
+  const el = $('page-' + idx);
+  if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+// ── Page deletion ──
+function toggleDelete(idx) {
+  if(pagesToDelete.has(idx)) pagesToDelete.delete(idx);
+  else pagesToDelete.add(idx);
+  syncDeleteClasses();
+  updateDeleteUI();
+  updateStatus();
+}
+
+function syncDeleteClasses() {
+  document.querySelectorAll('.thumb').forEach(t =>
+    t.classList.toggle('to-delete', pagesToDelete.has(parseInt(t.dataset.page)))
+  );
+  document.querySelectorAll('.page-wrap').forEach(p =>
+    p.classList.toggle('to-delete', pagesToDelete.has(parseInt(p.dataset.page)))
+  );
+}
+
+function updateDeleteUI() {
+  const n = pagesToDelete.size;
+  $('btnDeleteSelected').style.display = n > 0 ? '' : 'none';
+  $('deleteCount').textContent = n;
+}
+
+// ══════════════════════════════════════
+// ── Boolean Search Engine
+// ══════════════════════════════════════
+
+function tokenize(raw) {
+  const tokens = [];
+  const re = /"([^"]+)"|(\bAND\b)|(\bOR\b)|(\bNOT\b)|(\S+)/gi;
+  let m;
+  while((m = re.exec(raw)) !== null) {
+    if(m[1] !== undefined) tokens.push({type:'PHRASE', value: m[1]});
+    else if(m[2]) tokens.push({type:'AND'});
+    else if(m[3]) tokens.push({type:'OR'});
+    else if(m[4]) tokens.push({type:'NOT'});
+    else if(m[5]) tokens.push({type:'TERM', value: m[5]});
+  }
+  return tokens;
+}
+
+function buildAST(tokens) {
+  let pos = 0;
+  const peek = () => tokens[pos] || null;
+  const advance = () => tokens[pos++];
+
+  function expr() {
+    let left = andExpr();
+    while(peek() && peek().type === 'OR') { advance(); left = {op:'OR', l:left, r:andExpr()}; }
+    return left;
+  }
+  function andExpr() {
+    let left = notExpr();
+    while(peek()) {
+      if(peek().type === 'AND') { advance(); left = {op:'AND', l:left, r:notExpr()}; }
+      else if(peek().type === 'TERM' || peek().type === 'PHRASE' || peek().type === 'NOT') {
+        left = {op:'AND', l:left, r:notExpr()};
+      } else break;
+    }
+    return left;
+  }
+  function notExpr() {
+    if(peek() && peek().type === 'NOT') { advance(); return {op:'NOT', child:atom()}; }
+    return atom();
+  }
+  function atom() {
+    const t = advance();
+    if(!t) return {op:'TERM', v:''};
+    if(t.type === 'TERM' || t.type === 'PHRASE') return {op:'TERM', v: t.value.toLowerCase()};
+    return {op:'TERM', v: (t.value || '').toLowerCase()};
+  }
+
+  if(!tokens.length) return null;
+  return expr();
+}
+
+function evalAST(node, text) {
+  if(!node) return false;
+  const lc = text.toLowerCase();
+  switch(node.op) {
+    case 'TERM': return node.v ? lc.includes(node.v) : false;
+    case 'AND':  return evalAST(node.l, text) && evalAST(node.r, text);
+    case 'OR':   return evalAST(node.l, text) || evalAST(node.r, text);
+    case 'NOT':  return !evalAST(node.child, text);
+  }
+  return false;
+}
+
+function getPositiveTerms(node) {
+  const terms = [];
+  function walk(n) {
+    if(!n) return;
+    if(n.op === 'TERM' && n.v) terms.push(n.v);
+    if(n.op === 'AND' || n.op === 'OR') { walk(n.l); walk(n.r); }
+  }
+  walk(node);
+  return [...new Set(terms)];
+}
+
+// ── Search + highlights ──
+async function runSearch() {
+  const raw = $('searchInput').value.trim();
+  searchResults = [];
+  currentMatchIdx = -1;
+  document.querySelectorAll('.highlight-layer').forEach(l => l.innerHTML = '');
+  document.querySelectorAll('.thumb').forEach(t => t.classList.remove('search-match'));
+
+  if(!raw || !pdfDoc) { $('searchMeta').textContent = ''; return; }
+
+  // Wait for text extraction if still in progress
+  const notReady = pageTexts.filter(t => t === null).length;
+  if(notReady > 0) {
+    $('searchMeta').textContent = `indexing ${notReady}...`;
+    setTimeout(runSearch, 200);
+    return;
+  }
+
+  const tokens = tokenize(raw);
+  const ast = buildAST(tokens);
+  if(!ast) return;
+
+  const terms = getPositiveTerms(ast);
+
+  for(let i = 0; i < pdfDoc.numPages; i++) {
+    if(!evalAST(ast, pageTexts[i])) continue;
+
+    document.querySelectorAll('.thumb')[i]?.classList.add('search-match');
+
+    const page = await pdfDoc.getPage(i + 1);
+    const tc = await page.getTextContent();
+    const vp = page.getViewport({scale: SCALE});
+    const rects = [];
+
+    for(const item of tc.items) {
+      const str = item.str.toLowerCase();
+      for(const term of terms) {
+        let si = 0;
+        while(true) {
+          const idx = str.indexOf(term, si);
+          if(idx === -1) break;
+          const tx = pdfjsLib.Util.transform(vp.transform, item.transform);
+          const fontSize = Math.sqrt(tx[0]*tx[0] + tx[1]*tx[1]);
+          const charW = item.str.length > 0 ? (item.width * fontSize / item.str.length) : fontSize * 0.6;
+          const x = tx[4] + idx * charW;
+          const y = tx[5] - fontSize;
+          const w = term.length * charW;
+          const h = fontSize * 1.3;
+          rects.push({x, y, w, h});
+          si = idx + 1;
+        }
+      }
+    }
+    searchResults.push({pageIdx: i, rects});
+  }
+
+  searchResults.forEach((sr, gi) => {
+    const layer = $('hl-' + sr.pageIdx);
+    sr.rects.forEach(r => {
+      const d = document.createElement('div');
+      d.className = 'hl-rect';
+      d.dataset.group = gi;
+      d.style.left = r.x + 'px';
+      d.style.top = r.y + 'px';
+      d.style.width = r.w + 'px';
+      d.style.height = r.h + 'px';
+      layer.appendChild(d);
+    });
+  });
+
+  const totalHits = searchResults.reduce((s,r) => s + r.rects.length, 0);
+  const pages = searchResults.length;
+  $('searchMeta').textContent = pages > 0
+    ? `${totalHits} hit${totalHits!==1?'s':''} · ${pages} pg${pages!==1?'s':''}`
+    : '0 matches';
+
+  if(searchResults.length > 0) { currentMatchIdx = 0; goToMatch(0); }
+}
+
+function goToMatch(idx) {
+  document.querySelectorAll('.hl-rect.current').forEach(el => el.classList.remove('current'));
+  if(idx < 0 || idx >= searchResults.length) return;
+  currentMatchIdx = idx;
+  const sr = searchResults[idx];
+  $('hl-' + sr.pageIdx).querySelectorAll(`.hl-rect[data-group="${idx}"]`)
+    .forEach(el => el.classList.add('current'));
+  scrollToPage(sr.pageIdx);
+  $('searchMeta').textContent = `${idx+1}/${searchResults.length} pages`;
+}
+
+let searchTimer;
+$('searchInput').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 300);
+});
+$('searchInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter') { e.preventDefault(); e.shiftKey ? prevMatch() : nextMatch(); }
+  if(e.key === 'Escape') { $('searchInput').value = ''; runSearch(); $('searchInput').blur(); }
+});
+$('prevMatch').addEventListener('click', prevMatch);
+$('nextMatch').addEventListener('click', nextMatch);
+
+function nextMatch() {
+  if(!searchResults.length) return;
+  goToMatch((currentMatchIdx + 1) % searchResults.length);
+}
+function prevMatch() {
+  if(!searchResults.length) return;
+  goToMatch((currentMatchIdx - 1 + searchResults.length) % searchResults.length);
+}
+
+// ── Save PDF ──
+$('btnSave').addEventListener('click', savePDF);
+$('btnDeleteSelected').addEventListener('click', () => {
+  if(!pagesToDelete.size) return;
+  if(pagesToDelete.size >= pdfDoc.numPages) { showToast("Can't delete all pages"); return; }
+  savePDF();
+});
+
+async function savePDF() {
+  if(!pdfBytes) return;
+  showProgress(30);
+  try {
+    const doc = await PDFLib.PDFDocument.load(pdfBytes);
+    const sorted = [...pagesToDelete].sort((a,b) => b - a);
+    sorted.forEach(idx => { if(idx < doc.getPageCount()) doc.removePage(idx); });
+    showProgress(60);
+
+    const saved = await doc.save();
+    const blob = new Blob([saved], {type:'application/pdf'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName.replace(/\.pdf$/i, '') + (pagesToDelete.size > 0 ? '_edited' : '') + '.pdf';
+    a.click();
+    URL.revokeObjectURL(url);
+    showProgress(80);
+
+    const deleted = pagesToDelete.size;
+    if(deleted > 0) {
+      pdfBytes = new Uint8Array(saved);
+      pdfDoc = await pdfjsLib.getDocument({data: pdfBytes.slice()}).promise;
+      pageDims = [];
+      for(let i = 0; i < pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i + 1);
+        const vp = page.getViewport({scale: SCALE});
+        pageDims.push({w: vp.width, h: vp.height});
+      }
+      pageTexts = new Array(pdfDoc.numPages).fill(null);
+      extractTextProgressively();
+      pagesToDelete.clear();
+      searchResults = [];
+      currentMatchIdx = -1;
+      renderedPages.clear();
+      renderedThumbs.clear();
+      buildSkeleton();
+      for(let i = 0; i < Math.min(RENDER_AHEAD + 1, pdfDoc.numPages); i++) {
+        await renderPage(i);
+        await renderThumb(i);
+      }
+      setupViewerObserver();
+      setupSidebarObserver();
+      updateDeleteUI();
+      updateStatus();
+      showToast(`Saved — ${deleted} page${deleted>1?'s':''} removed`);
+    } else {
+      showToast('PDF saved');
+    }
+  } catch(err) {
+    showToast('Error: ' + err.message);
+  }
+  hideProgress();
+}
+
+// ── Status ──
+function updateStatus() {
+  if(!pdfDoc) return;
+  const at = document.querySelector('.thumb.active');
+  const cp = at ? parseInt(at.dataset.page) + 1 : 1;
+  $('statusLeft').textContent = `Page ${cp} of ${pdfDoc.numPages}`;
+  $('statusRight').textContent = pagesToDelete.size > 0
+    ? `${pagesToDelete.size} marked for deletion`
+    : `${renderedPages.size} rendered · ${fileName}`;
+}
+
+function showToast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+document.addEventListener('keydown', e => {
+  if((e.ctrlKey || e.metaKey) && e.key === 'f') { e.preventDefault(); $('searchInput')?.focus(); }
+  if((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if(pdfDoc) savePDF(); }
+});
+</script>
+</body>
+</html>
