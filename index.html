@@ -418,8 +418,9 @@ const $ = id => document.getElementById(id);
 // ── State ──
 let pdfDoc = null;
 let pdfBytes = null;
-let pageTexts = [];
-let pageDims = [];          // [{w, h}] at SCALE for each page
+let pageTexts = [];          // joined normalized text per page (for boolean matching)
+let pageTextItems = [];      // raw text content items per page [{str, transform, width, height}]
+let pageDims = [];           // [{w, h}] at SCALE for each page
 let pagesToDelete = new Set();
 let searchResults = [];
 let currentMatchIdx = -1;
@@ -483,6 +484,7 @@ async function loadFile(file) {
 
   // Extract text progressively in background
   pageTexts = new Array(pdfDoc.numPages).fill(null);
+  pageTextItems = new Array(pdfDoc.numPages).fill(null);
   extractTextProgressively();
 
   // Reset state
@@ -523,34 +525,44 @@ async function loadFile(file) {
 // ── Extract text in background without blocking ──
 function extractTextProgressively() {
   let i = 0;
-  function extractNext() {
-    if(!pdfDoc || i >= pdfDoc.numPages) return;
-    const idx = i++;
-    pdfDoc.getPage(idx + 1).then(page => {
+
+  function processPage(idx) {
+    return pdfDoc.getPage(idx + 1).then(page =>
       page.getTextContent().then(tc => {
-        pageTexts[idx] = tc.items.map(it => it.str).join(' ');
-        // Continue on next idle frame
-        if(typeof requestIdleCallback !== 'undefined') {
-          requestIdleCallback(extractNext);
-        } else {
-          setTimeout(extractNext, 0);
+        // Store raw items for highlight positioning
+        pageTextItems[idx] = tc.items.filter(it => it.str.length > 0);
+
+        // Build a normalized searchable string by joining items smartly:
+        // If items are on different lines or far apart, insert a space.
+        // This prevents false joins ("hel" + "lo" → "hello" is fine,
+        // but "price" + "100" on different lines shouldn't become "price100")
+        const items = pageTextItems[idx];
+        let fullText = '';
+        for(let j = 0; j < items.length; j++) {
+          const item = items[j];
+          if(j > 0) {
+            // Check if we need a separator
+            const prev = items[j-1];
+            const prevEnd = prev.str;
+            const lastChar = prevEnd[prevEnd.length - 1];
+            // Add space if previous didn't end with space and current doesn't start with space
+            if(lastChar !== ' ' && item.str[0] !== ' ') {
+              fullText += ' ';
+            }
+          }
+          fullText += item.str;
         }
-      });
-    });
+        pageTexts[idx] = fullText;
+      })
+    );
   }
-  // Kick off — first batch of 10 run quickly, then idle
+
+  // First batch: do 10 pages quickly
   function extractBatch() {
     const batchEnd = Math.min(i + 10, pdfDoc.numPages);
     const promises = [];
     while(i < batchEnd) {
-      const idx = i++;
-      promises.push(
-        pdfDoc.getPage(idx + 1).then(page =>
-          page.getTextContent().then(tc => {
-            pageTexts[idx] = tc.items.map(it => it.str).join(' ');
-          })
-        )
-      );
+      promises.push(processPage(i++));
     }
     Promise.all(promises).then(() => {
       if(i < pdfDoc.numPages) {
@@ -562,6 +574,20 @@ function extractTextProgressively() {
       }
     });
   }
+
+  function extractNext() {
+    if(!pdfDoc || i >= pdfDoc.numPages) return;
+    processPage(i++).then(() => {
+      if(i < pdfDoc.numPages) {
+        if(typeof requestIdleCallback !== 'undefined') {
+          requestIdleCallback(extractNext);
+        } else {
+          setTimeout(extractNext, 0);
+        }
+      }
+    });
+  }
+
   extractBatch();
 }
 
@@ -869,6 +895,56 @@ function getPositiveTerms(node) {
 }
 
 // ── Search + highlights ──
+
+// Build a map from character offset in the joined page text back to
+// which text item (and offset within it) that character came from.
+// This lets us find a match in the joined string and map it back to
+// exact item positions for accurate highlighting.
+function buildCharMap(pageIdx) {
+  const items = pageTextItems[pageIdx];
+  if(!items) return null;
+  // charMap[i] = {itemIdx, charInItem} for each char in pageTexts[pageIdx]
+  const map = [];
+  let pos = 0;
+  for(let j = 0; j < items.length; j++) {
+    if(j > 0) {
+      const prev = items[j-1];
+      const lastChar = prev.str[prev.str.length - 1];
+      if(lastChar !== ' ' && items[j].str[0] !== ' ') {
+        // This corresponds to the space we inserted during extraction
+        map.push({itemIdx: -1, charInItem: -1}); // separator space
+        pos++;
+      }
+    }
+    for(let c = 0; c < items[j].str.length; c++) {
+      map.push({itemIdx: j, charInItem: c});
+      pos++;
+    }
+  }
+  return map;
+}
+
+// Given an item and the viewport, compute the bounding rect for a
+// range of characters within that item
+function getItemCharRect(item, charStart, charEnd, vp) {
+  const tx = pdfjsLib.Util.transform(vp.transform, item.transform);
+  // tx = [scaleX, skewX, skewY, scaleY, translateX, translateY]
+  const fontSize = Math.sqrt(tx[0]*tx[0] + tx[1]*tx[1]);
+  const totalWidth = item.width * fontSize;
+  const strLen = item.str.length;
+  if(strLen === 0) return null;
+
+  const charW = totalWidth / strLen;
+  const isLTR = tx[0] >= 0;
+
+  const x = tx[4] + (isLTR ? charStart * charW : -(charEnd) * charW);
+  const y = tx[5] - fontSize;
+  const w = (charEnd - charStart) * charW;
+  const h = fontSize * 1.3;
+
+  return {x, y, w: Math.abs(w), h: Math.abs(h)};
+}
+
 async function runSearch() {
   const raw = $('searchInput').value.trim();
   searchResults = [];
@@ -897,33 +973,60 @@ async function runSearch() {
 
     document.querySelectorAll('.thumb')[i]?.classList.add('search-match');
 
+    // Build character map for this page
+    const charMap = buildCharMap(i);
+    if(!charMap) { searchResults.push({pageIdx: i, rects: []}); continue; }
+
+    const items = pageTextItems[i];
+    const pageText = pageTexts[i].toLowerCase();
     const page = await pdfDoc.getPage(i + 1);
-    const tc = await page.getTextContent();
-    const vp = page.getViewport({scale: SCALE});
+    const realVp = page.getViewport({scale: SCALE});
+
     const rects = [];
 
-    for(const item of tc.items) {
-      const str = item.str.toLowerCase();
-      for(const term of terms) {
-        let si = 0;
-        while(true) {
-          const idx = str.indexOf(term, si);
-          if(idx === -1) break;
-          const tx = pdfjsLib.Util.transform(vp.transform, item.transform);
-          const fontSize = Math.sqrt(tx[0]*tx[0] + tx[1]*tx[1]);
-          const charW = item.str.length > 0 ? (item.width * fontSize / item.str.length) : fontSize * 0.6;
-          const x = tx[4] + idx * charW;
-          const y = tx[5] - fontSize;
-          const w = term.length * charW;
-          const h = fontSize * 1.3;
-          rects.push({x, y, w, h});
-          si = idx + 1;
+    for(const term of terms) {
+      let searchFrom = 0;
+      while(true) {
+        const matchStart = pageText.indexOf(term, searchFrom);
+        if(matchStart === -1) break;
+        const matchEnd = matchStart + term.length;
+        searchFrom = matchStart + 1;
+
+        // Map the match range back to item positions
+        // Group consecutive chars by item to create minimal rects
+        let currentItemIdx = -2;
+        let runStart = -1;
+        let runCharStart = -1;
+
+        for(let ci = matchStart; ci < matchEnd; ci++) {
+          const cm = charMap[ci];
+          if(!cm || cm.itemIdx === -1) continue; // skip separator spaces
+
+          if(cm.itemIdx !== currentItemIdx) {
+            // Flush previous run
+            if(currentItemIdx >= 0 && runStart >= 0) {
+              const rect = getItemCharRect(items[currentItemIdx], runStart, runCharStart + 1, realVp);
+              if(rect && rect.w > 0) rects.push(rect);
+            }
+            currentItemIdx = cm.itemIdx;
+            runStart = cm.charInItem;
+            runCharStart = cm.charInItem;
+          } else {
+            runCharStart = cm.charInItem;
+          }
+        }
+        // Flush last run
+        if(currentItemIdx >= 0 && runStart >= 0) {
+          const rect = getItemCharRect(items[currentItemIdx], runStart, runCharStart + 1, realVp);
+          if(rect && rect.w > 0) rects.push(rect);
         }
       }
     }
+
     searchResults.push({pageIdx: i, rects});
   }
 
+  // Render highlight rects
   searchResults.forEach((sr, gi) => {
     const layer = $('hl-' + sr.pageIdx);
     sr.rects.forEach(r => {
@@ -1017,6 +1120,7 @@ async function savePDF() {
         pageDims.push({w: vp.width, h: vp.height});
       }
       pageTexts = new Array(pdfDoc.numPages).fill(null);
+      pageTextItems = new Array(pdfDoc.numPages).fill(null);
       extractTextProgressively();
       pagesToDelete.clear();
       searchResults = [];
