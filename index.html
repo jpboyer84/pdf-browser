@@ -216,7 +216,7 @@
     padding: 3px 12px; border-radius: 4px; z-index: 5; letter-spacing: 0.5px;
   }
 
-  .page-wrap canvas { display: block; }
+  .page-wrap canvas { display: block; width: 100%; height: auto; }
 
   .page-placeholder {
     display: flex; align-items: center; justify-content: center;
@@ -629,7 +629,9 @@ function buildSkeleton() {
     wrap.id = 'page-' + i;
     wrap.dataset.page = i;
     wrap.style.width = dim.w + 'px';
-    wrap.style.height = dim.h + 'px';
+    wrap.style.maxWidth = '100%';
+    wrap.style.height = 'auto';
+    wrap.style.aspectRatio = `${dim.w} / ${dim.h}`;
 
     const ph = document.createElement('div');
     ph.className = 'page-placeholder';
@@ -638,8 +640,8 @@ function buildSkeleton() {
 
     const hlLayer = document.createElement('div');
     hlLayer.className = 'highlight-layer';
-    hlLayer.style.width = dim.w + 'px';
-    hlLayer.style.height = dim.h + 'px';
+    hlLayer.style.width = '100%';
+    hlLayer.style.height = '100%';
     hlLayer.id = 'hl-' + i;
     wrap.appendChild(hlLayer);
 
@@ -1033,10 +1035,11 @@ async function runSearch() {
       const d = document.createElement('div');
       d.className = 'hl-rect';
       d.dataset.group = gi;
-      d.style.left = r.x + 'px';
-      d.style.top = r.y + 'px';
-      d.style.width = r.w + 'px';
-      d.style.height = r.h + 'px';
+      const dim = pageDims[sr.pageIdx];
+      d.style.left = (r.x / dim.w * 100) + '%';
+      d.style.top = (r.y / dim.h * 100) + '%';
+      d.style.width = (r.w / dim.w * 100) + '%';
+      d.style.height = (r.h / dim.h * 100) + '%';
       layer.appendChild(d);
     });
   });
